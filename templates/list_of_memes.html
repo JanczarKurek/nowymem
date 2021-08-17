@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <title>Recent memes</title>
+</head>
+<body>
+<form action="/kill_commercial" method="post">
+    <button type="submit" formaction="/kill_commercial" formmethod="post">PLZ MAKE IT STOP...</button>
+</form>
+<table>
+    {% for item in memes %}
+        <tr>
+            <th>
+            <img src="memes/{{ item }}" style="height: 200px;width: 200px">
+            </th>
+            <th>
+            <form action="report/{{ item }}" method="post">
+                <button type="submit" formaction="report/{{ item }}" formmethod="post">REPORT!</button>
+            </form>
+            </th>
+        </tr>
+    {% endfor %}
+</table>
+</body>
+</html>
