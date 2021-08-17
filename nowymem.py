@@ -10,6 +10,7 @@ import signal
 import json
 import argparse
 from random import choice
+from pprint import pformat
 
 from aiohttp.web_request import Request
 from aiohttp.web_response import Response
@@ -21,6 +22,9 @@ import aiohttp.web as web
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger('').setLevel("DEBUG")
+
+logger = logging.getLogger(__name__)
+
 
 class MemeStatus(Enum):
     NEW = 'NEW'
@@ -43,19 +47,16 @@ class MemeQueue:
         self._memes: dict[Path, Meme] = {}
         self._memes_queue: deque[Path] = deque()
         self._displayed_memes = []
+        try:
+            self._meme_info = json.load(open("meme_info"))
+        except FileNotFoundError:
+            self._meme_info = {}
+        logger.debug(f"meme_info = {pformat(self._meme_info)}")
     
     def add_meme(self, meme_path: Path, is_init=False):
-        if is_init:
-            try:
-                info = json.load(open("meme_info"))
-            except FileNotFoundError:
-                info = {}
-        else:
-            info = {}
+        info = self._meme_info
         if meme_path not in self._memes.keys():
-            meme_status = info.get(meme_path, MemeStatus.NEW) if is_init else MemeStatus.NEW
-            if meme_status not in self.BAD_STATUSES and is_init:
-                meme_status = MemeStatus.NORMAL
+            meme_status = MemeStatus(info.get(str(meme_path), "NORMAL")) if is_init else MemeStatus.NEW
             meme = Meme(meme_path, meme_status)
             self._memes[meme_path] = meme
             self._memes_queue.append(meme_path)
