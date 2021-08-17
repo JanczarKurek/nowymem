@@ -132,6 +132,7 @@ class MemeWatcher:
         self._display_time: float = display_time
         self.directory = Path(directory)
         self.meme_queue = MemeQueue()
+        self._ensure_commercial = False
         self._meme_displayer = MemeDisplay()
         self._commercial_rate = commercial_rate
         self._commercial_directory = Path(commercial_directory) if commercial_directory else None
@@ -144,6 +145,9 @@ class MemeWatcher:
     
     async def kill_commercial(self):
         await self._meme_displayer.kill_commercial()
+    
+    def ask_for_commercial(self):
+        self._ensure_commercial = True
 
     async def watch_memes(self):
         meme_display = self._meme_displayer
@@ -154,6 +158,10 @@ class MemeWatcher:
             for meme_path in self.directory.iterdir():
                 self.meme_queue.add_meme(meme_path)
             if self._commercial_directory and not (meme_cnt % self._commercial_rate):
+                await meme_display.display_commercial(self.get_random_commercial())
+            if self._ensure_commercial:
+                self._ensure_commercial = False
+                meme_cnt = 0
                 await meme_display.display_commercial(self.get_random_commercial())
             else:
                 meme = self.meme_queue.next_meme()
@@ -194,6 +202,10 @@ class MemeServer:
     async def kill_commercial(self, request: Request):
         await self._meme_watcher.kill_commercial()
         return Response(text="Ok!")
+    
+    async def plz_show_commercial(self, request: Request):
+        self._meme_watcher.ask_for_commercial()
+        return Response(text="Ok!")
         
     async def last_meme(self, request: Request):
         meme_path = self._meme_watcher.meme_queue.get_last_memes(1)
@@ -212,6 +224,7 @@ class MemeServer:
             web.get(f"/memes/{{meme}}", self.serve_meme),
             web.get('/last_meme', self.last_meme),
             web.post('/kill_commercial', self.kill_commercial),
+            web.post('/ask_commercial', self.plz_show_commercial),
         ])
         self._app.on_shutdown.append(self._cleanup)
         await web._run_app(self._app, host=hostname, port=port)
