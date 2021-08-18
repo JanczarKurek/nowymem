@@ -6,10 +6,10 @@ import logging
 from typing import Optional
 from collections import deque
 import subprocess as sub
+import os
 import signal
 import json
 import argparse
-from random import choice
 from pprint import pformat
 
 from aiohttp.web_request import Request
@@ -110,13 +110,27 @@ class MultimediaQueue:
 
 class MemeDisplay:
     
-    def __init__(self):
+    def __init__(self, feh_pid=None, displayed_pic_path=None):
         self._current_commercial = None
-    
+        self._feh_display = feh_pid
+        self._pic_path = displayed_pic_path
+
+    async def _is_loadable(self, meme_path):
+        args = ['feh', '--loadable', str(meme_path)]
+        proc = await asyncio.create_subprocess_exec(*args)
+        await proc.communicate()
+        print(f"LOADABLE RESULT: {proc.returncode}")
+        return proc.returncode == 0
+
     async def display_meme(self, meme: Meme):
         print(f"{meme}")
-        args = ['feh', f'{meme.path}', '--bg-max']
-        sub.run(args)
+        if self._feh_display is None:
+            args = ['feh', f'{meme.path}', '--bg-max']
+            sub.run(args)
+        elif self._is_loadable(meme.path):
+            os.remove(self._pic_path)
+            os.symlink(meme.path, self._pic_path)
+            os.kill(self._feh_display, signal.SIGUSR1)
         if meme.status == MemeStatus.NEW:
             args = ["cvlc", "nowymem.wav", "--play-and-exit"]
             proc = await asyncio.create_subprocess_exec(*args)
@@ -140,13 +154,14 @@ class MemeDisplay:
 
 class MemeWatcher:
     
-    def __init__(self, display_time=5., directory: str = '.', commercial_rate=30, commercial_directory=None):
+    def __init__(self, display_time=5., directory: str = '.',
+                 commercial_rate=30, commercial_directory=None, feh_pid=None, feh_pic=None):
         self._display_time: float = display_time
         self.directory = Path(directory)
         self.meme_queue = MultimediaQueue('meme_info')
         self.commercial_queue = MultimediaQueue('commercial_info') if commercial_directory else None
         self._ensure_commercial = False
-        self._meme_displayer = MemeDisplay()
+        self._meme_displayer = MemeDisplay(feh_pid, feh_pic)
         self._commercial_rate = commercial_rate
         self._commercial_directory = Path(commercial_directory) if commercial_directory else None
 
@@ -155,19 +170,22 @@ class MemeWatcher:
     
     def ask_for_commercial(self):
         self._ensure_commercial = True
+    
+    def update_commercials(self, is_init=False):
+        if self._commercial_directory:
+            for commercial_path in self._commercial_directory.iterdir():
+                self.commercial_queue.add_media(commercial_path, is_init=is_init)
 
     async def watch_memes(self):
         meme_display = self._meme_displayer
         meme_cnt = 1
         for meme_path in self.directory.iterdir():
             self.meme_queue.add_media(meme_path, is_init=True)
-        for commercial_path in self._commercial_directory.iterdir():
-            self.commercial_queue.add_media(commercial_path, is_init=True)
+        self.update_commercials(is_init=True)
         while True:
             for meme_path in self.directory.iterdir():
                 self.meme_queue.add_media(meme_path)
-            for commercial_path in self._commercial_directory.iterdir():
-                self.commercial_queue.add_media(commercial_path)
+            self.update_commercials()
             if self._commercial_directory and not (meme_cnt % self._commercial_rate):
                 await meme_display.display_commercial(self.commercial_queue.next_media())
             if self._ensure_commercial:
@@ -206,8 +224,8 @@ class MemeServer:
         return Response(text="OK!")
 
     async def serve_meme(self, request: Request):
-        meme_path = Path(self._meme_watcher.directory / request.match_info['meme'])
-        print("meme_path")
+        meme_path = self._meme_watcher.directory / request.match_info['meme']
+        print(f"Trying to serve: {meme_path}")
         return FileResponse(meme_path)
     
     async def kill_commercial(self, request: Request):
@@ -242,8 +260,13 @@ class MemeServer:
 
 
 async def main(args):
-    meme_watcher = MemeWatcher(args.duration, directory=args.directory,
-        commercial_directory=args.commercial_dir, commercial_rate=args.commercial_rate,
+    meme_watcher = MemeWatcher(
+        args.duration,
+        directory=args.directory,
+        commercial_directory=args.commercial_dir,
+        commercial_rate=args.commercial_rate,
+        feh_pid=args.feh_pid,
+        feh_pic=args.feh_pic_path,
     )
     await asyncio.gather(
         meme_watcher.watch_memes(),
@@ -257,6 +280,8 @@ if __name__ == '__main__':
     parser.add_argument('--duration', type=float, default=5)
     parser.add_argument('--commercial-dir')
     parser.add_argument('--commercial-rate', type=int, default=100)
+    parser.add_argument('--feh-pid', type=int)
+    parser.add_argument('--feh-pic-path', type=Path)
     parser.add_argument('directory')
     args = parser.parse_args()
     asyncio.run(main(args))
